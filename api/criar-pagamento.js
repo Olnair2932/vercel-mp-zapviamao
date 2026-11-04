@@ -6,9 +6,26 @@ export default async function handler(req,res){
   if(req.method!=='POST') return res.status(405).json({error:'Method not allowed'});
   try{
     const {codigo,total_centavos,itens,taxa,filial} = req.body||{};
-    const token = process.env.MP_TOKEN;
-    if(!token) return res.status(500).json({error:'MP_TOKEN não configurado'});
+    const tokenEnv = process.env.MP_TOKEN;
     if(!codigo || !total_centavos) return res.status(400).json({error:'codigo e total_centavos obrigatórios'});
+    let token = tokenEnv;
+    try{
+      const sa = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+      if(sa && filial && filial!=='matriz'){
+        const admin = await import('firebase-admin');
+        if(!admin.apps.length){
+          const cred = JSON.parse(sa);
+          admin.initializeApp({credential: admin.credential.cert(cred)});
+        }
+        const db = admin.firestore();
+        const doc = await db.collection('filiais').doc(filial).get();
+        if(doc.exists){
+          const data = doc.data();
+          if(data.mp_token && data.mp_token.startsWith('APP_USR-')) token = data.mp_token;
+        }
+      }
+    }catch(e){ console.warn('Usando token dono:', e.message); }
+    if(!token) return res.status(500).json({error:'MP_TOKEN não configurado'});
     const r = await fetch('https://api.mercadopago.com/checkout/preferences',{
       method:'POST',
       headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
@@ -31,7 +48,7 @@ export default async function handler(req,res){
       })
     });
     const data = await r.json();
-    if(!r.ok) return res.status(r.status).json({error:'MP erro', details:data});
-    return res.status(200).json({init_point:data.init_point, id:data.id, codigo, filial:filial||'matriz'});
+    if(!r.ok) return res.status(r.status).json({error:'MP erro', details:data, filial});
+    return res.status(200).json({init_point:data.init_point, id:data.id, codigo, filial: filial||'matriz', proprio: token!==tokenEnv});
   }catch(e){ console.error(e); return res.status(500).json({error:'Erro interno', details:e.message}); }
 }
