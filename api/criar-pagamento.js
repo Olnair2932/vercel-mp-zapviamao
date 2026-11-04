@@ -1,63 +1,37 @@
-import { MercadoPagoConfig, Preference } from 'mercadopago';
-const client = new MercadoPagoConfig({ accessToken: process.env.MP_TOKEN });
-
-export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "https://central-d7800.web.app");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).json({erro:"Use POST"});
-  
-  try {
-    const body = req.body || {};
-    const codigo = body.codigo || body.pedidoId || 'PED'+Date.now();
-    const rawItens = body.itens || body.items || [];
-    const email = body.email || "cliente@zapviamao.com";
-    
-    if(!rawItens.length){
-      return res.status(400).json({erro:"Carrinho vazio", body});
-    }
-    
-    const items = rawItens.map(i => {
-      const title = String(i.nome || i.name || i.title || 'Item').slice(0,60);
-      const quantity = Number(i.qtd || i.qty || i.quantity || 1);
-      let unit_price = Number(i.preco || i.price || i.unit_price || 0);
-      return { title, quantity, unit_price: unit_price || 0.01, currency_id: "BRL" };
-    }).filter(i => i.unit_price > 0);
-    
-    if(!items.length){
-      return res.status(400).json({erro:"Itens sem preco", rawItens});
-    }
-    
-    if(body.taxa && Number(body.taxa) > 0){
-      items.push({
-        title: "Taxa de entrega",
-        quantity: 1,
-        unit_price: Number(body.taxa),
-        currency_id: "BRL"
-      });
-    }
-    
-    const preference = new Preference(client);
-    const result = await preference.create({
-      body: {
-        items,
-        payer: { email },
+export default async function handler(req,res){
+  res.setHeader('Access-Control-Allow-Origin','*');
+  res.setHeader('Access-Control-Allow-Methods','POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization');
+  if(req.method==='OPTIONS') return res.status(200).end();
+  if(req.method!=='POST') return res.status(405).json({error:'Method not allowed'});
+  try{
+    const {codigo,total_centavos,itens,taxa,filial} = req.body||{};
+    const token = process.env.MP_TOKEN;
+    if(!token) return res.status(500).json({error:'MP_TOKEN não configurado'});
+    if(!codigo || !total_centavos) return res.status(400).json({error:'codigo e total_centavos obrigatórios'});
+    const r = await fetch('https://api.mercadopago.com/checkout/preferences',{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+      body: JSON.stringify({
         external_reference: codigo,
-        back_urls: {
-          success: `https://central-d7800.web.app/sucesso.html?pedido=${codigo}`,
-          failure: `https://central-d7800.web.app/falha.html?pedido=${codigo}`,
-          pending: `https://central-d7800.web.app/pendente.html?pedido=${codigo}`
+        metadata:{codigo_pedido:codigo, filial:filial||'matriz'},
+        items:(itens||[]).map(it=>({
+          title:(it.nome||it.name||'Item').slice(0,120),
+          quantity:Number(it.qtd||it.quantity||1),
+          unit_price:Number(it.preco||it.price||0),
+          currency_id:'BRL'
+        })).concat(taxa>0?[{title:'Taxa de entrega',quantity:1,unit_price:Number(taxa),currency_id:'BRL'}]:[]),
+        back_urls:{
+          success:`https://central-d7800.web.app/sucesso.html?pedido=${codigo}&filial=${filial||'matriz'}`,
+          failure:`https://central-d7800.web.app/falha.html?pedido=${codigo}&filial=${filial||'matriz'}`,
+          pending:`https://central-d7800.web.app/pendente.html?pedido=${codigo}&filial=${filial||'matriz'}`
         },
-        auto_return: "approved",
-        statement_descriptor: "ZAP VIAMAO"
-      }
+        auto_return:'approved',
+        notification_url:'https://vercel-mp-zapviamao.vercel.app/api/webhook'
+      })
     });
-    
-    return res.status(200).json({ init_point: result.init_point, id: result.id, codigo });
-    
-  } catch(e){
-    console.error('MP erro', e);
-    return res.status(500).json({erro: e.message});
-  }
+    const data = await r.json();
+    if(!r.ok) return res.status(r.status).json({error:'MP erro', details:data});
+    return res.status(200).json({init_point:data.init_point, id:data.id, codigo, filial:filial||'matriz'});
+  }catch(e){ console.error(e); return res.status(500).json({error:'Erro interno', details:e.message}); }
 }
