@@ -1,0 +1,9 @@
+{
+  "name": "vercel-mp-zapviamao",
+  "version": "3.0.0",
+  "type": "module",
+  "dependencies": {
+    "mercadopago": "^2.0.0",
+    "firebase-admin": "^12.0.0"
+  }
+}

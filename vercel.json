@@ -1,0 +1,6 @@
+{
+  "version": 2,
+  "functions": {
+    "api/criar-pagamento.js": { "maxDuration": 10 }
+  }
+}
