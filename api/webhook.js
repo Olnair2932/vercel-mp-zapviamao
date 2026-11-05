@@ -1,37 +1,60 @@
-import crypto from 'node:crypto';
 import { MercadoPagoConfig, Payment } from 'mercadopago';
-import { registrarPagamento } from './firestore-pagamento.js';
-function assinaturaValida(req, secret) {
-  const signature = req.headers['x-signature'];
-  const requestId = req.headers['x-request-id'];
-  const queryId = req.query['data.id'];
-  if (typeof signature !== 'string' || typeof requestId !== 'string' || typeof queryId !== 'string') return false;
-  const parts = Object.fromEntries(signature.split(',').map(p => {
-    const i = p.indexOf('=');
-    return i < 0 ? ['', ''] : [p.slice(0,i).trim(), p.slice(i+1).trim()];
-  }));
-  const { ts, v1 } = parts;
-  if (!ts || !/^[0-9]+$/.test(ts) || !/^[a-fA-F0-9]{64}$/.test(v1||'')) return false;
-  const manifest = `id:${queryId.toLowerCase()};request-id:${requestId};ts:${ts};`;
-  const esperado = crypto.createHmac('sha256', secret).update(manifest).digest();
-  const recebido = Buffer.from(v1, 'hex');
-  return crypto.timingSafeEqual(esperado, recebido);
+import { initializeApp, cert, getApps } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+
+const client = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN });
+
+if (!getApps().length) {
+  const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  initializeApp({ credential: cert(sa) });
 }
+const db = getFirestore();
+
 export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).end();
-  if (!process.env.MP_TOKEN || !process.env.MP_WEBHOOK_SECRET) return res.status(500).end();
-  if (!assinaturaValida(req, process.env.MP_WEBHOOK_SECRET)) return res.status(401).end();
-  if (req.body?.type !== 'payment') return res.status(200).end();
-  const bodyId = req.body?.data?.id;
-  const queryId = req.query['data.id'];
-  if (bodyId == null || String(bodyId).toLowerCase() !== queryId.toLowerCase()) return res.status(400).end();
+  if (req.method !== 'POST') return res.status(405).send('Method not allowed');
   try {
-    const client = new MercadoPagoConfig({ accessToken: process.env.MP_TOKEN });
-    const payment = await new Payment(client).get({ id: String(bodyId) });
-    await registrarPagamento(payment);
-    return res.status(200).end();
+    const { type, data } = req.body || {};
+    if (type !== 'payment') return res.status(200).send('ignored');
+    const payment = new Payment(client);
+    const info = await payment.get({ id: data.id });
+    const status = info.status;
+    const codigo = info.external_reference;
+    if (!codigo) return res.status(200).send('no external_reference');
+    if (status === 'approved') {
+      await db.collection('entregas').doc(codigo).set({
+        pago: true,
+        status: 'pago',
+        pagamento_id: data.id,
+        pagoEm: Date.now(),
+        mp_status: status
+      }, { merge: true });
+      try {
+        const snapEnt = await db.collection('entregas').doc(codigo).get();
+        if (snapEnt.exists) {
+          const dados = snapEnt.data();
+          await db.collection('pedidos_privados').doc(codigo).set({
+            id: codigo,
+            filial: dados.filial || 'matriz',
+            total: dados.total || 0,
+            total_centavos: dados.total_centavos || 0,
+            subtotal: dados.subtotal || 0,
+            taxa: dados.taxa || 0,
+            itens: dados.itens || [],
+            cliente: dados.cliente || {},
+            tipo: dados.tipo || 'entrega',
+            pago: true,
+            status: 'pago',
+            forma_pagamento: '【entity-Mercado Pago¦canonical_name=Mercado Pago】',
+            createdAt: dados.createdAt || Date.now(),
+            pagoEm: Date.now(),
+            pagamento_id: data.id
+          }, { merge: true });
+        }
+      } catch (e) { console.error('Erro duplicar', e.message); }
+    }
+    return res.status(200).send('ok');
   } catch (e) {
     console.error(e);
-    return res.status(500).end();
+    return res.status(500).send(e.message);
   }
 }
