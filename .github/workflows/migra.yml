@@ -1,0 +1,50 @@
+name: Migra Pedidos MP
+on: workflow_dispatch
+jobs:
+  migra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 20}
+      - run: npm i firebase-admin
+      - name: Migra entregas -> pedidos_privados
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          node - << 'JS'
+          const admin = require('firebase-admin');
+          const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+          admin.initializeApp({credential: admin.credential.cert(sa)});
+          const db = admin.firestore();
+          (async()=>{
+            const snap = await db.collection('entregas').where('pago','==',true).get();
+            console.log('Achou', snap.size);
+            for(const doc of snap.docs){
+              const id = doc.id;
+              const d = doc.data();
+              if(!id.startsWith('PED-')) continue;
+              const ref = db.collection('pedidos_privados').doc(id);
+              const exists = await ref.get();
+              if(exists.exists){ console.log('Já existe', id); continue; }
+              await ref.set({
+                id:id,
+                filial:d.filial||'matriz',
+                total:d.total||1,
+                total_centavos:d.total_centavos||100,
+                subtotal:d.subtotal||1,
+                taxa:d.taxa||0,
+                itens:d.itens||[],
+                cliente:d.cliente||{nome:'João'},
+                tipo:d.tipo||'entrega',
+                pago:true,
+                status:'pago',
+                forma_pagamento:' 【entity-Mercado Pago¦canonical_name=Mercado Pago】',
+                createdAt:d.createdAt||Date.now(),
+                pagoEm:Date.now(),
+                pagamento_id:d.pagamento_id||''
+              },{merge:true});
+              console.log('Migrado', id);
+            }
+          })();
+          JS
