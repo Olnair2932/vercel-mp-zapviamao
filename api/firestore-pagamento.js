@@ -28,10 +28,10 @@ export async function registrarPagamento(payment) {
   return db.runTransaction(async tx => {
     const [pedidoSnap, registroSnap] = await Promise.all([tx.get(pedidoRef), tx.get(registroRef)]);
     if (registroSnap.exists) return 'duplicado';
-    if (!pedidoSnap.exists) throw new Error('Pedido não encontrado');
+    if (pedidoSnap.exists===false) return 'pedido_nao_encontrado';
     const pedido = pedidoSnap.data();
     if (pedido.total_centavos !== centavos) throw new Error('Valor diferente');
-    if (pedido.pago === true) throw new Error('Pedido já pago');
+    if (pedido.pago===true) return 'ja_pago';
 
     const filialId = pedido.filial || 'matriz';
     const shortId = genShortId(pedidoIdLong);

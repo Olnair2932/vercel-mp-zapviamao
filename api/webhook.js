@@ -28,8 +28,8 @@ export default async function handler(req, res) {
   const queryId = req.query['data.id'];
   if (bodyId == null || String(bodyId).toLowerCase() !== queryId.toLowerCase()) return res.status(400).end();
   try {
-    const client = new MercadoPagoConfig({ accessToken: process.env.MP_TOKEN });
-    const payment = await new Payment(client).get({ id: String(bodyId) });
+    let payment=null; let lastErr=null; const tokens=[process.env.MP_TOKEN]; try{ const saW=process.env.FIREBASE_SERVICE_ACCOUNT_JSON; if(saW){ const adminW=await import('firebase-admin'); if(adminW.apps.length===0){ adminW.initializeApp({credential:adminW.credential.cert(JSON.parse(saW))}); } const dbW=adminW.firestore(); const snapF=await dbW.collection('filiais').get(); snapF.forEach(d=>{ const tt=d.data().mp_token; if(tt && tt.startsWith('APP_USR-') && tokens.includes(tt)===false) tokens.push(tt); }); } }catch(e){ console.warn('tokens filial falhou', e.message); } for(const tk of tokens){ try{ const c=new MercadoPagoConfig({accessToken:tk}); payment=await new Payment(c).get({id:String(bodyId)}); break; }catch(e){ lastErr=e; if(e && e.status && e.status===404===false && e.status===401===false) throw e; } } if(payment===null) throw lastErr;
+    
     await registrarPagamento(payment);
     return res.status(200).end();
   } catch (e) {
