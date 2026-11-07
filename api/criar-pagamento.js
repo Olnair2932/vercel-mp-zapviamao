@@ -43,6 +43,12 @@ export default async function handler(req,res){
           failure:`https://central-d7800.web.app/falha.html?pedido=${codigo}&filial=${filial||'matriz'}`,
           pending:`https://central-d7800.web.app/pendente.html?pedido=${codigo}&filial=${filial||'matriz'}`
         },
+        payment_methods: {
+          excluded_payment_types: [
+            { id: "ticket" }
+          ],
+          installments: 12
+        },
         auto_return:'approved',
         notification_url:'https://vercel-mp-zapviamao.vercel.app/api/webhook'
       })
