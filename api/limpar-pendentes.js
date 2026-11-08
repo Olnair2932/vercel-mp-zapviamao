@@ -2,7 +2,7 @@ export default async function handler(req, res) {
   const _adm = await import('firebase-admin');
   const admin = _adm.default || _adm;
   if (!admin.apps.length) {
-    admin.initializeApp({ credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)) });
+    admin.initializeApp({ credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON)) });
   }
   const db = admin.firestore();
   const agora = new Date();
