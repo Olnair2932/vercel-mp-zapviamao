@@ -1,6 +1,14 @@
 {
   "version": 2,
   "functions": {
-    "api/criar-pagamento.js": { "maxDuration": 10 }
-  }
+    "api/criar-pagamento.js": {
+      "maxDuration": 10
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/limpar-pendentes",
+      "schedule": "0 3 * * *"
+    }
+  ]
 }
